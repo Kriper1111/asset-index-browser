@@ -1,7 +1,9 @@
-from typing import Any
-from util import SCRIPT_DIRECTORY
-from datetime import datetime as dt
 import atexit
+from datetime import datetime as dt
+from typing import Any
+
+from util import SCRIPT_DIRECTORY
+
 
 class Logger:
     LOG_DIRECTORY = SCRIPT_DIRECTORY.joinpath("logs")
@@ -11,7 +13,7 @@ class Logger:
         self.LOG_DIRECTORY.mkdir(exist_ok=True)
         date = dt.strftime(dt.now(), "%Y-%m-%d")
         self.log_file = open(self.LOG_DIRECTORY.joinpath(date).with_suffix(".log"), "a+", encoding="utf-8")
-    
+
     def __log__(self, why: str, who: str, what: str):
         date = dt.strftime(dt.now(), "%H:%M:%S")
         for line in what.splitlines():
@@ -20,7 +22,7 @@ class Logger:
         if self.__log_counter__ >= 5:
             self.__log_counter__ = 0
             self.log_file.flush()
-    
+
     def __getattr__(self, name: str) -> Any:
         if name in ["debug", "info", "warn", "error"]:
             return lambda who, what: self.__log__(name.upper(), who, what)

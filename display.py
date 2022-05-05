@@ -1,17 +1,17 @@
 import curses
-from os import initgroups
 import textwrap
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Union
 from enum import Enum
+from os import initgroups
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Union
 
 from input_manager import IInputListener, InputManager
-from util import clamp, floor
 from logger import logger
+from util import clamp, floor
 
 TerminalSize = NamedTuple("TerminalSize", [("height", int), ("width", int)])
 Window = NamedTuple("WindowSize", [("width", int), ("height", int), ("left", int), ("top", int)])
 Number = Union[float, int]
-# x x x x 
+# x x x x
 # y
 # y
 # y
@@ -24,7 +24,7 @@ class DisplayManager(IInputListener):
     def __init__(self):
         self.input_manager = InputManager()
         self.stdscr: "CursesWindow"
-    
+
     def start(self):
         self.init_curses()
         self.list_view = ListView()
@@ -42,17 +42,17 @@ class DisplayManager(IInputListener):
     def recalculate_layout(self):
         terminal_size = TerminalSize(*self.stdscr.getmaxyx())
         self.stdscr.refresh()
-        
+
         self.list_view.recalculate_layout(terminal_size)
         self.preview.recalculate_layout(terminal_size)
         self.stdscr.hline("=", terminal_size.width)
         self.stdscr.hline(terminal_size.height - 1, 0, "=", terminal_size.width)
 
         self.draw_title()
-    
+
     def on_resize(self):
         self.recalculate_layout()
-    
+
     def on_key(self, keycode): pass
 
     def set_title(self, title: str):
@@ -160,7 +160,7 @@ class DisplayPanel:
         left = self.left if isinstance(self.left, int) else floor(self.left * terminal_size.width)
         right = self.right if isinstance(self.right, int) else floor(self.right * terminal_size.width)
         width = self.width if isinstance(self.width, int) else floor(self.width * terminal_size.width)
-        
+
         # Assuming the process is the same for horizontals
         if self.float_horizontal == Align.LEFT:
             calculated_left = left
@@ -192,7 +192,7 @@ class DisplayPanel:
         self.window.clear()
         self.box(self.box_horizontal, self.box_vertical)
         self.window.refresh()
-    
+
     def box(self, horizonal: bool=False, vertical: bool=True):
         if horizonal:
             self.window.hline("=", self.max_width + 2)
@@ -230,7 +230,7 @@ class Panel(DisplayPanel):
             except Exception: pass
             lineno += 1
         self.window.refresh()
-    
+
     def set_text(self, new_text: str, horizontal_align: Align = Align.LEFT, vertical_align: Align = Align.TOP):
         self.contents = new_text
         self.refresh_contents(horizontal_align, vertical_align)
@@ -246,7 +246,7 @@ class Colors:
     def get_color(cls, forgeround=-1, background=-1):
         if forgeround == -1 and background == -1:
             raise ValueError("Invalid color pair!")
-        
+
         color_pair_hash = f"{forgeround}:{background}"
         color_pair = cls.color_registry.get(color_pair_hash)
         if color_pair is None:
@@ -264,7 +264,7 @@ class ListView(DisplayPanel):
         def __init__(self, color: int, predicate: Dict[str, Any]) -> None:
             self.color = Colors.get_color(color)
             self.predicate = predicate
-        
+
         def match(self, target_object) -> bool:
             matches = True
             try:
@@ -283,7 +283,7 @@ class ListView(DisplayPanel):
         self.list: List[IListElement] = []
         self.styles: List["ListView.StyleRule"] = []
         super().__init__()
-        
+
     def refresh_contents(self):
         self.window.clear()
         self.box()
@@ -299,7 +299,7 @@ class ListView(DisplayPanel):
             try: self.window.addstr(index, 1, entry.name, attribute)
             except curses.error: pass
         self.window.refresh()
-    
+
     def set_style(self, color_name: str, predicate):
         color: int = getattr(curses, color_name)
         self.styles.append(self.StyleRule(color, predicate))
@@ -308,7 +308,7 @@ class ListView(DisplayPanel):
         self.list = new_list
         self.cursor = clamp(self.cursor, 0, len(new_list) - 1)
         self.refresh_contents()
-    
+
     def insert_items(self, new_list):
         for offset, item in enumerate(new_list, start=1):
             self.list.insert(self.cursor + offset, item)
@@ -330,7 +330,7 @@ class ListView(DisplayPanel):
             if self.cursor - self.scroll_offset >= self.max_height:
                 self.scroll_offset += 1
         self.refresh_contents()
-    
+
     def next(self):
         if self.list:
             if self.cursor - 1 < 0: return
@@ -338,7 +338,7 @@ class ListView(DisplayPanel):
             if self.cursor - self.scroll_offset < 0:
                 self.scroll_offset -= 1
         self.refresh_contents()
-    
+
     def get_value(self):
         if not self.list: raise IndexError("List is empty!")
         return self.list[self.cursor]

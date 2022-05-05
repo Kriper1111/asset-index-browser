@@ -1,10 +1,9 @@
-from threading import Thread
-
-from typing import TYPE_CHECKING, Dict
-from logger import logger
-
 import curses
 import traceback
+from threading import Thread
+from typing import TYPE_CHECKING, Dict
+
+from logger import logger
 
 if TYPE_CHECKING:
     import _curses
@@ -29,7 +28,7 @@ class InputManager(Thread):
             except KeyboardInterrupt:
                 logger.warn("InputManager", "Caught Ctrl-C!")
 
-    # NOTE: Does not convert keys to key codes, i.e. layout-sensitive    
+    # NOTE: Does not convert keys to key codes, i.e. layout-sensitive
     def dispatch_event(self):
         char = self.curse.get_wch()
         if isinstance(char, int):
@@ -45,13 +44,13 @@ class InputManager(Thread):
             except:
                 logger.warn("InputManager", f"Listener {type(listener)} has caused an error")
                 logger.warn("InputManager", traceback.format_exc())
-    
+
     def stop(self):
         self.running = False
 
     def bind_window(self, stdscr: "CursesWindow"):
         self.curse = stdscr
-    
+
     def remove_listener(self, listener):
         listener_hash = hash(listener)
         self.listeners.pop(listener_hash)

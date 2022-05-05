@@ -36,7 +36,7 @@ class AssetIndexBrowser(IInputListener):
 
         self.asset_folder = asset_index.parent.parent
         self.asset_index_name = asset_index.stem
-        self.asset_index_tree = AssetIndex(asset_index_json).get_file_tree()        
+        self.asset_index_tree = AssetIndex(asset_index_json).get_file_tree()
 
     def await_termination(self):
         self.display_manager = DisplayManager()
@@ -47,9 +47,9 @@ class AssetIndexBrowser(IInputListener):
         self.display_manager.list_view.set_list(self.asset_index_tree.list_folder())
         self.display_manager.input_manager.add_listener(self)
         self.termination.wait()
-    
+
     def terminate(self):
-        logger.info("AssetBrowser", "Terminating..")
+        # logger.info("AssetBrowser", "Terminating..")
         self.display_manager.stop()
         self.termination.set()
 
@@ -63,7 +63,7 @@ class AssetIndexBrowser(IInputListener):
         elif key_code == "+" or key_code == " " or key_code == "\n":
             self.display_manager.preview.set_text("Select a file to preview", horizontal_align=Align.CENTER, vertical_align=Align.CENTER)
             selected_file = self.get_selected_file()
-            
+
             if selected_file.entry_type == 'entry:directory':
                 if not selected_file.expanded:
                     self.display_manager.list_view.insert_items(selected_file.list_folder())
@@ -88,38 +88,22 @@ class AssetIndexBrowser(IInputListener):
         elif key_code == "X":
             selected_file = self.get_selected_file()
             self.extract_entry(selected_file)
-            # if selected_file.entry_type == "entry:directory":
-            #     self.extract_folder(selected_file)
-            # if selected_file.entry_type == "entry:file":
-            #     self.extract_file(selected_file)
 
     def extract_entry(self, asset_file: "AssetTreeElement"):
-        for file in asset_file.collect_children("entry:file"):
-            version_folder = self.asset_folder.joinpath(self.asset_index_name)
-            destination = version_folder.joinpath(file.entry_name)
-            if destination.exists(): return # TODO: override prompt?
+        for _, _, children in asset_file.walk_tree():
+            for file in children:
+                version_folder = self.asset_folder.joinpath(self.asset_index_name)
+                destination = version_folder.joinpath(file.entry_name)
+                if destination.exists(): return # TODO: override prompt?
 
-            version_folder.mkdir(exist_ok=True, parents=True)
-            destination.parent.mkdir(exist_ok=True, parents=True)
+                version_folder.mkdir(exist_ok=True, parents=True)
+                destination.parent.mkdir(exist_ok=True, parents=True)
 
-            entry_path = self.asset_folder.joinpath("objects").joinpath(file.entry_hash[:2]).joinpath(file.entry_hash)
-            try: shutil.copy(entry_path, destination)
-            except Exception:
-                logger.error("AssetBrowser", f"Real file for {file.entry_name} not found!")
-
-    # def extract_file(self, asset_file: "AssetTreeElement"):
-    #     for file in asset_file.collect_children("entry:file"):
-    #         self.extract_file(file)
-
-    # def extract_file(self, asset_file: "AssetTreeElement"):
-    #     version_folder = self.asset_folder.joinpath(self.asset_index_name)
-    #     destination = version_folder.joinpath(asset_file.entry_name)
-    #     if destination.exists(): return # TODO: override prompt?
-
-    #     version_folder.mkdir(exist_ok=True)
-    #     destination.parent.mkdir(exist_ok=True)
-
-    #     shutil.copy(asset_file.entry_path, destination)
+                entry_path = self.asset_folder.joinpath("objects").joinpath(file.entry_hash[:2]).joinpath(file.entry_hash)
+                try: shutil.copy(entry_path, destination)
+                except Exception:
+                    logger.error("AssetBrowser", f"Real file for {file.entry_name} not found!")
+                    # logger.debug("AssetBrowser", f"Real file searched at: {entry_path}")
 
     def get_selected_file(self) -> "AssetTreeElement":
         selected_file = cast("AssetTreeElement", self.display_manager.list_view.get_value())
@@ -167,26 +151,26 @@ class AssetIndex:
             asset_index_element.asset_hash = metadata.get("hash")
             asset_index_element.asset_size = metadata.get("size", -1)
             self.asset_list.append(asset_index_element)
-    
+
     def get_file_tree(self):
         file_tree = AssetTreeElement()
         for asset in self.asset_list:
             current_dir = file_tree
-            depth_indent = ""
             for part in asset.virtual_path.parts:
-                if not current_dir.has_folder(depth_indent + part):
-                    current_dir.create_folder(depth_indent + part)
-                current_dir = current_dir.get_folder(depth_indent + part)
-                depth_indent += "  "
+                if not current_dir.has_folder(part):
+                    current_dir.create_folder(part)
+                current_dir = current_dir.get_folder(part)
             current_dir.entry_type = "entry:file"
             current_dir.entry_hash = asset.asset_hash
             current_dir.entry_name = asset.virtual_path
         return file_tree
 
 AssetTreeEntryType = Union[Literal["entry:file"], Literal["entry:directory"]]
+
 # This could be done with dicts.. Maybe I'll revert to them
 class AssetTreeElement(IListElement):
-    name: str = "."
+    object_name: str = "."
+    depth: int = -1
     entry_type: AssetTreeEntryType = "entry:directory"
     children: Dict[str, "AssetTreeElement"]
     entry_hash: str
@@ -194,48 +178,49 @@ class AssetTreeElement(IListElement):
     entry_path: pathlib.Path
     expanded: bool = False
 
+    @property
+    def name(self):
+        return ("  " * self.depth) + self.object_name
+
     def __init__(self) -> None:
         self.children = {}
 
     def has_folder(self, name):
         return self.children.get(name) is not None
-    
+
     def get_folder(self, name):
         return self.children[name]
-    
+
     def create_folder(self, name):
         folder = AssetTreeElement()
-        folder.name = name
+        folder.object_name = name
         folder.entry_type = "entry:directory"
+        folder.depth = self.depth + 1
         self.children.update({name: folder})
-    
+
     def list_folder(self):
         return list(self.children.values())
-    
+
+    def walk_tree(self):
+        walk_objects = [self]
+        while walk_objects:
+            new_walk_objects = []
+            for root in walk_objects:
+                contents = root.list_folder()
+                folders = list(filter(lambda fo: fo.entry_type == "entry:directory", contents))
+                files = list(filter(lambda fo: fo.entry_type == "entry:file", contents))
+                yield root, folders, files
+                new_walk_objects.extend(contents)
+            walk_objects.clear()
+            walk_objects.extend(new_walk_objects)
+
     def count_expanded_children(self):
         child_count = 0
-        to_count = [self]
-        while to_count:
-            new_kids = []
-            for counter in to_count:
-                if counter.expanded: new_kids.extend(counter.list_folder())
-            child_count += len(new_kids)
-            to_count.clear()
-            to_count.extend(new_kids)
+        for root, dirs, files in self.walk_tree():
+            if root.expanded:
+                child_count += len(dirs)
+                child_count += len(files)
         return child_count
-    
-    def collect_children(self, entry_type: AssetTreeEntryType):
-        collected = []
-        to_walk = [self]
-        while to_walk:
-            new_kids = []
-            for walker in to_walk:
-                if walker.entry_type == entry_type:
-                    collected.append(walker)
-                new_kids.extend(walker.list_folder())
-            to_walk.clear()
-            to_walk.extend(new_kids)
-        return collected
 
     def __repr__(self) -> str:
         return f"<{'Folder' if self.entry_type == 'entry:directory' else 'File' } object ('{self.name}')>"
@@ -246,7 +231,7 @@ def setup():
     except IndexError:
         print("Please provide a path to an asset index to browse")
         return
-    
+
     asset_index_browser = AssetIndexBrowser()
     try:
         asset_index_browser.load_index(asset_index)
