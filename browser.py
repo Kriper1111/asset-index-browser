@@ -93,12 +93,16 @@ class AssetIndexBrowser(IInputListener):
     def extract_entry(self, asset_file: "AssetTreeElement"):
         files_to_extract = 0
         files_extracted = 0
-        for _, _, children in asset_file.walk_tree():
+        for root, _, children in asset_file.walk_tree():
+            if root.entry_type == "entry:file":
+                children.append(root)
             for file in children:
                 files_to_extract += 1
                 version_folder = self.asset_folder.joinpath(self.asset_index_name)
                 destination = version_folder.joinpath(file.entry_name)
-                if destination.exists(): return # TODO: override prompt?
+                if destination.exists():
+                    logger.warn("AssetBrowser", f"Destination already exists for {file.entry_name}!")
+                    return # TODO: override prompt?
 
                 version_folder.mkdir(exist_ok=True, parents=True)
                 destination.parent.mkdir(exist_ok=True, parents=True)
