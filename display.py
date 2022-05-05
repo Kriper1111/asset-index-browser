@@ -1,9 +1,8 @@
 import curses
+from os import initgroups
 import textwrap
-from typing import TYPE_CHECKING, Callable, Dict, Generic, List, NamedTuple, TypeVar, Union
-from collections import namedtuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Union
 from enum import Enum
-from typing_extensions import TypeGuard
 
 from input_manager import IInputListener, InputManager
 from util import clamp, floor
@@ -80,6 +79,7 @@ class DisplayManager(IInputListener):
         self.stdscr.keypad(True)
         try:
             curses.start_color()
+            curses.use_default_colors()
         except:
             pass
 
@@ -178,27 +178,9 @@ class DisplayPanel:
             calculated_width = terminal_size.width - right if width == 0 else width
             calculated_left = terminal_size.width - calculated_width
 
-    #     logger.debug("DisplayPanel", "Recalculated window")
-    #     logger.debug("DisplayPanel", f"""VERTICAL RULES:
-    # + Align: {self.float_vertical}
-    # + Top: {self.top}
-    # + Bottom: {self.bottom}
-    # + Height: {self.height}""")
-    #     logger.debug("DisplayPanel", f"""CALCULATED:
-    # + Height: {calculated_height}
-    # + Top: {calculated_top}""")
-    #     logger.debug("DisplayPanel", f"""HORIZONTAL RULES:
-    # + Align: {self.float_horizontal}
-    # + Left: {self.left}
-    # + Right: {self.right}
-    # + Width: {self.width}""")
-    #     logger.debug("DisplayPanel", f"""CALCULATED:
-    # + Width: {calculated_width}
-    # + Left: {calculated_left}""")
         return Window(calculated_width, calculated_height, calculated_left, calculated_top)
 
     def recalculate_layout(self, terminal_size: TerminalSize):
-        logger.debug("DisplayPanel", f"Recalculating layout to fit {terminal_size}")
         window = self.get_size(terminal_size)
 
         self.window.mvwin(window.top, window.left)
@@ -256,24 +238,72 @@ class Panel(DisplayPanel):
 class IListElement:
     name: str
 
-# T = TypeVar("T", IListElement)
+class Colors:
+    color_pair_count = 1 # 0th pair is the default color
+    color_registry: Dict[str, int] = {}
+
+    @classmethod
+    def get_color(cls, forgeround=-1, background=-1):
+        if forgeround == -1 and background == -1:
+            raise ValueError("Invalid color pair!")
+        
+        color_pair_hash = f"{forgeround}:{background}"
+        color_pair = cls.color_registry.get(color_pair_hash)
+        if color_pair is None:
+            if cls.color_pair_count + 1 > curses.COLOR_PAIRS:
+                raise IndexError("Too many colors registered!")
+            curses.init_pair(cls.color_pair_count, forgeround, background)
+            color_pair = cls.color_pair_count
+            cls.color_registry.update({color_pair_hash: color_pair})
+            cls.color_pair_count += 1
+
+        return color_pair
+
 class ListView(DisplayPanel):
+    class StyleRule:
+        def __init__(self, color: int, predicate: Dict[str, Any]) -> None:
+            self.color = Colors.get_color(color)
+            self.predicate = predicate
+        
+        def match(self, target_object) -> bool:
+            matches = True
+            try:
+                for key, value in self.predicate.items():
+                    if getattr(target_object, key) != value:
+                        matches = False
+                        break
+            except AttributeError:
+                matches = False
+            return matches
+
     def __init__(self):
         self.width = 0.4
         self.cursor = 0
         self.scroll_offset = 0
         self.list: List[IListElement] = []
+        self.styles: List["ListView.StyleRule"] = []
         super().__init__()
         
     def refresh_contents(self):
         self.window.clear()
         self.box()
         for index, entry in enumerate(self.list[self.scroll_offset:self.scroll_offset+self.max_height]):
-            attribute = curses.A_REVERSE if index == (self.cursor - self.scroll_offset) else curses.A_NORMAL
+            object_color = 0
+
+            for rule in self.styles:
+                if rule.match(entry):
+                    object_color = rule.color
+                    break
+
+            attribute = curses.A_REVERSE if index == (self.cursor - self.scroll_offset) else curses.color_pair(object_color)
             try: self.window.addstr(index, 1, entry.name, attribute)
             except curses.error: pass
         self.window.refresh()
     
+    def set_style(self, color_name: str, predicate):
+        color: int = getattr(curses, color_name)
+        self.styles.append(self.StyleRule(color, predicate))
+
     def set_list(self, new_list):
         self.list = new_list
         self.cursor = clamp(self.cursor, 0, len(new_list) - 1)
@@ -299,7 +329,6 @@ class ListView(DisplayPanel):
             self.cursor += 1
             if self.cursor - self.scroll_offset >= self.max_height:
                 self.scroll_offset += 1
-                logger.debug("ListView", f"Changing scroll offset to {self.scroll_offset}, cursor at {self.cursor}")
         self.refresh_contents()
     
     def next(self):
@@ -308,7 +337,6 @@ class ListView(DisplayPanel):
             self.cursor -= 1
             if self.cursor - self.scroll_offset < 0:
                 self.scroll_offset -= 1
-                logger.debug("ListView", f"Changing scroll offset to {self.scroll_offset}, cursor at {self.cursor}")
         self.refresh_contents()
     
     def get_value(self):

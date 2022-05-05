@@ -43,6 +43,7 @@ class AssetIndexBrowser(IInputListener):
         self.display_manager.start()
         self.display_manager.set_title(f"Asset index: {self.asset_index_name}")
         self.display_manager.preview.set_text("Select a file to preview", horizontal_align=Align.CENTER, vertical_align=Align.CENTER)
+        self.display_manager.list_view.set_style("COLOR_BLUE", {"entry_type": "entry:directory"})
         self.display_manager.list_view.set_list(self.asset_index_tree.list_folder())
         self.display_manager.input_manager.add_listener(self)
         self.termination.wait()
@@ -62,7 +63,6 @@ class AssetIndexBrowser(IInputListener):
         elif key_code == "+" or key_code == " " or key_code == "\n":
             self.display_manager.preview.set_text("Select a file to preview", horizontal_align=Align.CENTER, vertical_align=Align.CENTER)
             selected_file = self.get_selected_file()
-            logger.debug("AssetBrowser", f"Selected {'file' if selected_file.entry_type == 'entry:file' else 'folder'} {selected_file}")
             
             if selected_file.entry_type == 'entry:directory':
                 if not selected_file.expanded:
@@ -74,8 +74,12 @@ class AssetIndexBrowser(IInputListener):
             elif selected_file.entry_type == 'entry:file':
                 file_preview = self.get_file_preview(selected_file)
                 if not file_preview[1]:
+                    reason = "This file cannot be previewed "
+                    if file_preview[0] == "none": reason += "because this file does not exist."
+                    elif file_preview[0] == "unknown": reason += "because it's format is not recognized."
+                    else: reason += "because it's not a text file"
                     self.display_manager.preview.set_text(
-                        "This file cannot be previewed",
+                        reason,
                         horizontal_align=Align.CENTER,
                         vertical_align=Align.CENTER
                     )
@@ -83,25 +87,39 @@ class AssetIndexBrowser(IInputListener):
                     self.display_manager.preview.set_text(file_preview[1])
         elif key_code == "X":
             selected_file = self.get_selected_file()
-            if selected_file.entry_type == "entry:file":
-                self.extract_file(selected_file)
-        elif key_code == "KEY_F(3)":
-            logger.debug("AssetBrowser", f"Selection at {self.display_manager.list_view.cursor}")
-        elif key_code == "KEY_F(5)":
-            logger.flush()
-        else:
-            logger.debug("AssetBrowser", f"Unprocessed key: {key_code}")
+            self.extract_entry(selected_file)
+            # if selected_file.entry_type == "entry:directory":
+            #     self.extract_folder(selected_file)
+            # if selected_file.entry_type == "entry:file":
+            #     self.extract_file(selected_file)
 
+    def extract_entry(self, asset_file: "AssetTreeElement"):
+        for file in asset_file.collect_children("entry:file"):
+            version_folder = self.asset_folder.joinpath(self.asset_index_name)
+            destination = version_folder.joinpath(file.entry_name)
+            if destination.exists(): return # TODO: override prompt?
 
-    def extract_file(self, asset_file: "AssetTreeElement"):
-        version_folder = self.asset_folder.joinpath(self.asset_index_name)
-        destination = version_folder.joinpath(asset_file.entry_name)
-        if destination.exists(): return # TODO: override prompt?
+            version_folder.mkdir(exist_ok=True, parents=True)
+            destination.parent.mkdir(exist_ok=True, parents=True)
 
-        version_folder.mkdir(exist_ok=True)
-        destination.parent.mkdir(exist_ok=True)
+            entry_path = self.asset_folder.joinpath("objects").joinpath(file.entry_hash[:2]).joinpath(file.entry_hash)
+            try: shutil.copy(entry_path, destination)
+            except Exception:
+                logger.error("AssetBrowser", f"Real file for {file.entry_name} not found!")
 
-        shutil.copy(asset_file.entry_path, destination)
+    # def extract_file(self, asset_file: "AssetTreeElement"):
+    #     for file in asset_file.collect_children("entry:file"):
+    #         self.extract_file(file)
+
+    # def extract_file(self, asset_file: "AssetTreeElement"):
+    #     version_folder = self.asset_folder.joinpath(self.asset_index_name)
+    #     destination = version_folder.joinpath(asset_file.entry_name)
+    #     if destination.exists(): return # TODO: override prompt?
+
+    #     version_folder.mkdir(exist_ok=True)
+    #     destination.parent.mkdir(exist_ok=True)
+
+    #     shutil.copy(asset_file.entry_path, destination)
 
     def get_selected_file(self) -> "AssetTreeElement":
         selected_file = cast("AssetTreeElement", self.display_manager.list_view.get_value())
@@ -165,10 +183,11 @@ class AssetIndex:
             current_dir.entry_name = asset.virtual_path
         return file_tree
 
+AssetTreeEntryType = Union[Literal["entry:file"], Literal["entry:directory"]]
 # This could be done with dicts.. Maybe I'll revert to them
 class AssetTreeElement(IListElement):
     name: str = "."
-    entry_type: Union[Literal["entry:file"], Literal["entry:directory"]] = "entry:directory"
+    entry_type: AssetTreeEntryType = "entry:directory"
     children: Dict[str, "AssetTreeElement"]
     entry_hash: str
     entry_name: pathlib.PurePath
@@ -205,6 +224,19 @@ class AssetTreeElement(IListElement):
             to_count.extend(new_kids)
         return child_count
     
+    def collect_children(self, entry_type: AssetTreeEntryType):
+        collected = []
+        to_walk = [self]
+        while to_walk:
+            new_kids = []
+            for walker in to_walk:
+                if walker.entry_type == entry_type:
+                    collected.append(walker)
+                new_kids.extend(walker.list_folder())
+            to_walk.clear()
+            to_walk.extend(new_kids)
+        return collected
+
     def __repr__(self) -> str:
         return f"<{'Folder' if self.entry_type == 'entry:directory' else 'File' } object ('{self.name}')>"
 
