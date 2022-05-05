@@ -1,0 +1,9 @@
+.vscode
+pyrightconfig.json
+
+__pycache__
+*.py[ic]
+
+assets
+logs
+test*
