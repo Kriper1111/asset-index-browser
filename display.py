@@ -1,7 +1,7 @@
 import curses
 import textwrap
+from contextlib import contextmanager
 from enum import Enum
-from os import initgroups
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Union
 
 from input_manager import IInputListener, InputManager
@@ -11,10 +11,7 @@ from util import clamp, floor
 TerminalSize = NamedTuple("TerminalSize", [("height", int), ("width", int)])
 Window = NamedTuple("WindowSize", [("width", int), ("height", int), ("left", int), ("top", int)])
 Number = Union[float, int]
-# x x x x
-# y
-# y
-# y
+
 
 if TYPE_CHECKING:
     import _curses
@@ -23,12 +20,27 @@ if TYPE_CHECKING:
 class DisplayManager(IInputListener):
     def __init__(self):
         self.input_manager = InputManager()
+        # self.panel_stack: List[DisplayPanel] = []
         self.stdscr: "CursesWindow"
 
     def start(self):
         self.init_curses()
-        self.list_view = ListView()
-        self.preview = Panel()
+        self.list_view = ListView(DisplayPanelProperties()
+                .set_name("File view")
+                .set_constraints(bottom=3)
+                .set_size(width=0.4)
+                .set_borders(vertical=True))
+        self.preview = Panel(DisplayPanelProperties()
+                .set_name("File preview")
+                .set_constraints(left=0.4, bottom=3)
+                .set_size(width=0.6)
+                .set_alignment(horizontal=Align.RIGHT))
+        self.status_panel = Panel(DisplayPanelProperties()
+                .set_name("Status panel")
+                .set_constraints(bottom=0)
+                .set_alignment(vertical=Align.BOTTOM)
+                .set_size(height=3)
+                .set_borders(horizontal=True))
         self.title = "Window Title"
         self.recalculate_layout()
         self.input_manager.bind_window(self.stdscr)
@@ -45,6 +57,7 @@ class DisplayManager(IInputListener):
 
         self.list_view.recalculate_layout(terminal_size)
         self.preview.recalculate_layout(terminal_size)
+        self.status_panel.recalculate_layout(terminal_size)
         self.stdscr.hline("=", terminal_size.width)
         self.stdscr.hline(terminal_size.height - 1, 0, "=", terminal_size.width)
 
@@ -103,8 +116,7 @@ Align.offset_getters = {
     2: lambda length, max_size: max_size - length
 }
 
-class DisplayPanel:
-    window: "CursesWindow"
+class DisplayPanelProperties:
     top: Number = 1
     left: Number = 0
     right: Number = 0
@@ -117,12 +129,46 @@ class DisplayPanel:
     float_vertical = Align.TOP
 
     box_horizontal = False
-    box_vertical = True
+    box_vertical = False
+
+    registry_name = "DisplayPanel"
+
+    def set_constraints(self, left: Number=None, top: Number=None, bottom: Number=None, right: Number=None):
+        if top is not None: self.top = top
+        if left is not None: self.left = left
+        if right is not None: self.right = right
+        if bottom is not None: self.bottom = bottom
+        return self
+    
+    def set_alignment(self, horizontal: Align=None, vertical: Align=None):
+        if horizontal: self.float_horizontal = horizontal
+        if vertical: self.float_vertical = vertical
+        return self
+    
+    def set_borders(self, vertical: bool=None, horizontal: bool=None):
+        if vertical: self.box_vertical = vertical
+        if horizontal: self.box_horizontal = horizontal
+        return self
+    
+    def set_size(self, width: Number=None, height: Number=None):
+        if width: self.width = width
+        if height: self.height = height
+        return self
+    
+    def set_name(self, name: str):
+        self.registry_name = name
+        return self
+
+class DisplayPanel:
+    properties: DisplayPanelProperties
+    window: "CursesWindow"
 
     max_width: int
     max_height: int
 
-    def __init__(self):
+    def __init__(self, properties: DisplayPanelProperties):
+        self.properties = properties
+
         window = self.get_size(TerminalSize(10, 10))
         self.window = curses.newwin(window.height, window.width, window.top, window.left)
 
@@ -135,15 +181,15 @@ class DisplayPanel:
         calculated_width = 0
         calculated_height = 0
 
-        top = self.top if isinstance(self.top, int) else floor(self.top * terminal_size.height)
-        bottom = self.bottom if isinstance(self.bottom, int) else floor(self.bottom * terminal_size.height)
-        height = self.height if isinstance(self.height, int) else floor(self.height * terminal_size.height)
+        top = self.properties.top if isinstance(self.properties.top, int) else floor(self.properties.top * terminal_size.height)
+        bottom = self.properties.bottom if isinstance(self.properties.bottom, int) else floor(self.properties.bottom * terminal_size.height)
+        height = self.properties.height if isinstance(self.properties.height, int) else floor(self.properties.height * terminal_size.height)
 
-        if self.float_vertical == Align.TOP:
+        if self.properties.float_vertical == Align.TOP:
             leftover_height = terminal_size.height - top - bottom
             calculated_height = leftover_height if height == 0 else min(leftover_height, height)
             calculated_top = top
-        elif self.float_vertical == Align.CENTER:
+        elif self.properties.float_vertical == Align.CENTER:
             if height == 0: # 0 means 'auto'
                 calculated_top = top
                 calculated_height = terminal_size.height - top - bottom
@@ -151,22 +197,22 @@ class DisplayPanel:
                 leftover_height = terminal_size.height - top - bottom
                 calculated_height = min(leftover_height, height)
                 calculated_top = (terminal_size.height - calculated_height) // 2
-        elif self.float_vertical == Align.BOTTOM:
+        elif self.properties.float_vertical == Align.BOTTOM:
             leftover_height = terminal_size.height - top - bottom
             calculated_height = leftover_height if height == 0 else min(leftover_height, height)
             # calculated_height = terminal_size.height - bottom if height == 0 else height
             calculated_top = terminal_size.height - calculated_height
 
-        left = self.left if isinstance(self.left, int) else floor(self.left * terminal_size.width)
-        right = self.right if isinstance(self.right, int) else floor(self.right * terminal_size.width)
-        width = self.width if isinstance(self.width, int) else floor(self.width * terminal_size.width)
+        left = self.properties.left if isinstance(self.properties.left, int) else floor(self.properties.left * terminal_size.width)
+        right = self.properties.right if isinstance(self.properties.right, int) else floor(self.properties.right * terminal_size.width)
+        width = self.properties.width if isinstance(self.properties.width, int) else floor(self.properties.width * terminal_size.width)
 
         # Assuming the process is the same for horizontals
-        if self.float_horizontal == Align.LEFT:
+        if self.properties.float_horizontal == Align.LEFT:
             calculated_left = left
-            leftover_width = terminal_size.width - top - bottom
+            leftover_width = terminal_size.width - left - right
             calculated_width = leftover_width if width == 0 else min(leftover_width, width)
-        elif self.float_horizontal == Align.CENTER:
+        elif self.properties.float_horizontal == Align.CENTER:
             if width == 0: # 0 means 'auto'
                 calculated_left = left
                 calculated_width = terminal_size.width - left - right
@@ -174,11 +220,38 @@ class DisplayPanel:
                 leftover_width = terminal_size.width - left - right
                 calculated_width = min(leftover_width, width)
                 calculated_left = (terminal_size.width - calculated_width) // 2
-        elif self.float_horizontal == Align.RIGHT:
+        elif self.properties.float_horizontal == Align.RIGHT:
             calculated_width = terminal_size.width - right if width == 0 else width
             calculated_left = terminal_size.width - calculated_width
 
+        #     logger.debug("DisplayPanel", f"Resizing panel {self.properties.registry_name}")
+        #     logger.debug("DisplayPanel", f"""Horizontal layout rules:
+        # + Float: {self.properties.float_horizontal}
+        # + Left: {self.properties.left}
+        # + Right: {self.properties.right}
+        # + Width: {self.properties.width}""")
+        #     logger.debug("DisplayPanel", f"""Calculated layout:
+        # + Width: {calculated_width}
+        # + Height: {calculated_height}
+        # + Top: {calculated_top}
+        # + Left: {calculated_left}""")
+
         return Window(calculated_width, calculated_height, calculated_left, calculated_top)
+
+    @contextmanager
+    def begin_writing(self):
+        try:
+            self.window.clear()
+            yield None
+        finally:
+            self.box()
+            self.window.refresh()
+    
+    def add_string(self, y: int, x: int, string: str, attrs: int = 0):
+        y += int(not self.properties.box_vertical)
+        x += int(not self.properties.box_horizontal)
+        try: self.window.addstr(y, x, string, attrs)
+        except curses.error: pass
 
     def recalculate_layout(self, terminal_size: TerminalSize):
         window = self.get_size(terminal_size)
@@ -186,33 +259,28 @@ class DisplayPanel:
         self.window.mvwin(window.top, window.left)
         self.window.resize(window.height, window.width)
 
-        self.max_width = window.width - (2 if self.box_vertical else 0)
-        self.max_height = window.height - (2 if self.box_horizontal else 0)
+        self.max_width = window.width - (2 if self.properties.box_vertical else 0)
+        self.max_height = window.height - (2 if self.properties.box_horizontal else 0)
 
         self.window.clear()
-        self.box(self.box_horizontal, self.box_vertical)
+        self.box()
         self.window.refresh()
 
-    def box(self, horizonal: bool=False, vertical: bool=True):
-        if horizonal:
-            self.window.hline("=", self.max_width + 2)
+    def box(self, horizonal: bool=False, vertical: bool=False):
+        if horizonal or self.properties.box_horizontal:
+            self.window.hline(0, 0, "=", self.max_width + 2)
             self.window.hline(self.max_height + 1, 0, "=", self.max_width + 2)
-        if vertical:
-            self.window.vline("|", self.max_height + 2)
+        if vertical or self.properties.box_vertical:
+            self.window.vline(0, 0, "|", self.max_height + 2)
             self.window.vline(0, self.max_width + 1, "|", self.max_height + 2)
 
     def refresh_contents(self):
         raise NotImplementedError()
 
 class Panel(DisplayPanel):
-    def __init__(self):
-        self.left = 0.4
-        self.width = 0.6
+    def __init__(self, properties: DisplayPanelProperties):
+        super().__init__(properties)
         self.contents: str = ""
-        self.float_horizontal = Align.RIGHT
-        self.box_horizontal = False
-        self.box_vertical = False
-        super().__init__()
 
     def refresh_contents(self, horizontal_align: Align, vertical_align: Align):
         viewport = []
@@ -222,14 +290,12 @@ class Panel(DisplayPanel):
 
         viewport = viewport[:self.max_height]
 
-        lineno = vertical_align.get_offset(len(viewport), self.max_height)
-        self.window.clear()
-        for line in viewport:
-            line_offset = horizontal_align.get_offset(len(line), self.max_width)
-            try: self.window.addstr(lineno, line_offset, line)
-            except Exception: pass
-            lineno += 1
-        self.window.refresh()
+        with self.begin_writing():
+            lineno = vertical_align.get_offset(len(viewport), self.max_height)
+            for line in viewport:
+                line_offset = horizontal_align.get_offset(len(line), self.max_width)
+                self.add_string(lineno, line_offset, line)
+                lineno += 1
 
     def set_text(self, new_text: str, horizontal_align: Align = Align.LEFT, vertical_align: Align = Align.TOP):
         self.contents = new_text
@@ -276,29 +342,25 @@ class ListView(DisplayPanel):
                 matches = False
             return matches
 
-    def __init__(self):
-        self.width = 0.4
+    def __init__(self, properties: DisplayPanelProperties):
+        super().__init__(properties)
         self.cursor = 0
         self.scroll_offset = 0
         self.list: List[IListElement] = []
         self.styles: List["ListView.StyleRule"] = []
-        super().__init__()
 
     def refresh_contents(self):
-        self.window.clear()
-        self.box()
-        for index, entry in enumerate(self.list[self.scroll_offset:self.scroll_offset+self.max_height]):
-            object_color = 0
+        with self.begin_writing():
+            for index, entry in enumerate(self.list[self.scroll_offset:self.scroll_offset+self.max_height]):
+                object_color = 0
 
-            for rule in self.styles:
-                if rule.match(entry):
-                    object_color = rule.color
-                    break
+                for rule in self.styles:
+                    if rule.match(entry):
+                        object_color = rule.color
+                        break
 
-            attribute = curses.A_REVERSE if index == (self.cursor - self.scroll_offset) else curses.color_pair(object_color)
-            try: self.window.addstr(index, 1, entry.name, attribute)
-            except curses.error: pass
-        self.window.refresh()
+                attribute = curses.A_REVERSE if index == (self.cursor - self.scroll_offset) else curses.color_pair(object_color)
+                self.add_string(index, 0, entry.name, attribute)
 
     def set_style(self, color_name: str, predicate):
         color: int = getattr(curses, color_name)

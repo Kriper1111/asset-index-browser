@@ -4,7 +4,7 @@ import shutil
 import sys
 import traceback
 from threading import Event
-from typing import Dict, List, Literal, Optional, Tuple, Union, cast
+from typing import Dict, List, Literal, Tuple, Union, cast
 
 from display import Align, DisplayManager, IListElement
 from input_manager import IInputListener
@@ -54,6 +54,7 @@ class AssetIndexBrowser(IInputListener):
         self.termination.set()
 
     def on_key(self, key_code):
+        self.display_manager.status_panel.set_text(" | Arrows to move selection | X to extract | Space to expand folders | ")
         if key_code == "Q":
             self.terminate()
         elif key_code == "KEY_UP":
@@ -90,8 +91,11 @@ class AssetIndexBrowser(IInputListener):
             self.extract_entry(selected_file)
 
     def extract_entry(self, asset_file: "AssetTreeElement"):
+        files_to_extract = 0
+        files_extracted = 0
         for _, _, children in asset_file.walk_tree():
             for file in children:
+                files_to_extract += 1
                 version_folder = self.asset_folder.joinpath(self.asset_index_name)
                 destination = version_folder.joinpath(file.entry_name)
                 if destination.exists(): return # TODO: override prompt?
@@ -100,10 +104,14 @@ class AssetIndexBrowser(IInputListener):
                 destination.parent.mkdir(exist_ok=True, parents=True)
 
                 entry_path = self.asset_folder.joinpath("objects").joinpath(file.entry_hash[:2]).joinpath(file.entry_hash)
-                try: shutil.copy(entry_path, destination)
+                try:
+                    shutil.copy(entry_path, destination)
+                    files_extracted += 1
+                    # self.display_manager.status_panel.set_progress()
                 except Exception:
                     logger.error("AssetBrowser", f"Real file for {file.entry_name} not found!")
                     # logger.debug("AssetBrowser", f"Real file searched at: {entry_path}")
+        self.display_manager.status_panel.set_text(f"Files extracted: {files_extracted}/{files_to_extract}")
 
     def get_selected_file(self) -> "AssetTreeElement":
         selected_file = cast("AssetTreeElement", self.display_manager.list_view.get_value())
