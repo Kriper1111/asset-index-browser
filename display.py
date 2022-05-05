@@ -1,6 +1,6 @@
 import curses
 import textwrap
-from typing import TYPE_CHECKING, Callable, Dict, List, NamedTuple, Union
+from typing import TYPE_CHECKING, Callable, Dict, Generic, List, NamedTuple, TypeVar, Union
 from collections import namedtuple
 from enum import Enum
 from typing_extensions import TypeGuard
@@ -253,39 +253,64 @@ class Panel(DisplayPanel):
         self.contents = new_text
         self.refresh_contents(horizontal_align, vertical_align)
 
+class IListElement:
+    name: str
+
+# T = TypeVar("T", IListElement)
 class ListView(DisplayPanel):
     def __init__(self):
         self.width = 0.4
         self.cursor = 0
-        self.list: List[str] = []
+        self.scroll_offset = 0
+        self.list: List[IListElement] = []
         super().__init__()
         
     def refresh_contents(self):
         self.window.clear()
         self.box()
-        for index, entry in enumerate(self.list):
-            attribute = curses.A_REVERSE if index == self.cursor else curses.A_NORMAL
-            try: self.window.addstr(index, 1, entry, attribute)
+        for index, entry in enumerate(self.list[self.scroll_offset:self.scroll_offset+self.max_height]):
+            attribute = curses.A_REVERSE if index == (self.cursor - self.scroll_offset) else curses.A_NORMAL
+            try: self.window.addstr(index, 1, entry.name, attribute)
             except curses.error: pass
         self.window.refresh()
     
     def set_list(self, new_list):
-        self.cursor = clamp(self.cursor, 0, len(new_list) - 1)
         self.list = new_list
+        self.cursor = clamp(self.cursor, 0, len(new_list) - 1)
+        self.refresh_contents()
+    
+    def insert_items(self, new_list):
+        for offset, item in enumerate(new_list, start=1):
+            self.list.insert(self.cursor + offset, item)
+        self.cursor = clamp(self.cursor, 0, len(self.list) - 1)
+        self.refresh_contents()
+
+    def collapse_items(self, item_count):
+        before = len(self.list)
+        self.list = self.list[:self.cursor + 1] + self.list[self.cursor + 1 + item_count:]
+        after = len(self.list)
+        logger.debug("ListView", f"Collapsed {before - after} items of {item_count}")
+        self.cursor = clamp(self.cursor, 0, len(self.list) - 1)
         self.refresh_contents()
 
     def prev(self):
         if self.list:
             if self.cursor + 1 >= len(self.list): return
             self.cursor += 1
+            if self.cursor - self.scroll_offset >= self.max_height:
+                self.scroll_offset += 1
+                logger.debug("ListView", f"Changing scroll offset to {self.scroll_offset}, cursor at {self.cursor}")
         self.refresh_contents()
     
     def next(self):
         if self.list:
             if self.cursor - 1 < 0: return
             self.cursor -= 1
+            if self.cursor - self.scroll_offset < 0:
+                self.scroll_offset -= 1
+                logger.debug("ListView", f"Changing scroll offset to {self.scroll_offset}, cursor at {self.cursor}")
         self.refresh_contents()
     
     def get_value(self):
-        if not self.list: return None
+        if not self.list: raise IndexError("List is empty!")
         return self.list[self.cursor]

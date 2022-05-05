@@ -37,6 +37,8 @@ class Logger:
 
     # def warn(self, who: str, what: Any):
     #     self.__log__("WARN", who, what)
+    def flush(self):
+        self.log_file.flush()
 
     def close(self):
         self.log_file.close()

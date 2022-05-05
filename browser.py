@@ -1,22 +1,32 @@
-import pathlib
 import json
+import pathlib
+import shutil
 import sys
-from threading import Event
-
-from typing import List, Optional, Tuple
 import traceback
+from threading import Event
+from typing import Dict, List, Literal, Optional, Tuple, Union, cast
 
-from display import DisplayManager, Align
+from display import Align, DisplayManager, IListElement
 from input_manager import IInputListener
 from logger import logger
 
+
 class AssetIndexBrowser(IInputListener):
+    FILE_TYPES = {
+        ".mcmeta": "text",
+        ".txt": "text",
+        ".json": "text",
+        ".lang": "text",
+        ".png": "image",
+        ".ogg": "sound",
+    }
+
     def __init__(self):
         self.asset_folder: pathlib.Path
         self.asset_index_name: str
         self.display_manager: DisplayManager
 
-        self.asset_index_tree = {}
+        self.asset_index_tree: "AssetTreeElement"
         self.termination = Event()
 
     def load_index(self, asset_index_path):
@@ -33,7 +43,7 @@ class AssetIndexBrowser(IInputListener):
         self.display_manager.start()
         self.display_manager.set_title(f"Asset index: {self.asset_index_name}")
         self.display_manager.preview.set_text("Select a file to preview", horizontal_align=Align.CENTER, vertical_align=Align.CENTER)
-        self.display_manager.list_view.set_list(list(self.asset_index_tree.keys()))
+        self.display_manager.list_view.set_list(self.asset_index_tree.list_folder())
         self.display_manager.input_manager.add_listener(self)
         self.termination.wait()
     
@@ -52,45 +62,70 @@ class AssetIndexBrowser(IInputListener):
         elif key_code == "+" or key_code == " " or key_code == "\n":
             self.display_manager.preview.set_text("Select a file to preview", horizontal_align=Align.CENTER, vertical_align=Align.CENTER)
             selected_file = self.get_selected_file()
-            logger.debug("AssetBrowser", f"Selected file {selected_file}")
-            if selected_file is not None:
+            logger.debug("AssetBrowser", f"Selected {'file' if selected_file.entry_type == 'entry:file' else 'folder'} {selected_file}")
+            
+            if selected_file.entry_type == 'entry:directory':
+                if not selected_file.expanded:
+                    self.display_manager.list_view.insert_items(selected_file.list_folder())
+                    selected_file.expanded = True
+                else:
+                    self.display_manager.list_view.collapse_items(selected_file.count_expanded_children())
+                    selected_file.expanded = False
+            elif selected_file.entry_type == 'entry:file':
                 file_preview = self.get_file_preview(selected_file)
-                if file_preview == "":
-                    self.display_manager.preview.set_text("This file cannot be previewed", horizontal_align=Align.CENTER, vertical_align=Align.CENTER)
+                if not file_preview[1]:
+                    self.display_manager.preview.set_text(
+                        "This file cannot be previewed",
+                        horizontal_align=Align.CENTER,
+                        vertical_align=Align.CENTER
+                    )
                 else:
                     self.display_manager.preview.set_text(file_preview[1])
-        # else:
-        #     logger.warn("AssetBrowser", f"Unprocessed keypress {key_code}")
+        elif key_code == "X":
+            selected_file = self.get_selected_file()
+            if selected_file.entry_type == "entry:file":
+                self.extract_file(selected_file)
+        elif key_code == "KEY_F(3)":
+            logger.debug("AssetBrowser", f"Selection at {self.display_manager.list_view.cursor}")
+        elif key_code == "KEY_F(5)":
+            logger.flush()
+        else:
+            logger.debug("AssetBrowser", f"Unprocessed key: {key_code}")
 
-    def get_selected_file(self) -> Optional[pathlib.Path]:
-        selected_value = self.display_manager.list_view.get_value()
-        if selected_value is None: return
-        selected_file = self.asset_index_tree[selected_value]
-        if selected_file.get("file:hash") is not None:
+
+    def extract_file(self, asset_file: "AssetTreeElement"):
+        version_folder = self.asset_folder.joinpath(self.asset_index_name)
+        destination = version_folder.joinpath(asset_file.entry_name)
+        if destination.exists(): return # TODO: override prompt?
+
+        version_folder.mkdir(exist_ok=True)
+        destination.parent.mkdir(exist_ok=True)
+
+        shutil.copy(asset_file.entry_path, destination)
+
+    def get_selected_file(self) -> "AssetTreeElement":
+        selected_file = cast("AssetTreeElement", self.display_manager.list_view.get_value())
+        if selected_file.entry_type == "entry:file":
             # It's a file
-            asset_hash: str = selected_file.get("file:hash")
-            asset_path = self.asset_folder.joinpath("objects").joinpath(asset_hash[:2]).joinpath(asset_hash)
-            return asset_path
+            asset_hash = selected_file.entry_hash
+            selected_file.entry_path = self.asset_folder.joinpath("objects").joinpath(asset_hash[:2]).joinpath(asset_hash)
+        return selected_file
 
-    def get_file_preview(self, asset_file: pathlib.Path) -> Tuple[str, str]:
-        if not asset_file.exists():
+    def get_file_preview(self, asset_file: "AssetTreeElement") -> Tuple[str, str]:
+        if not asset_file.entry_path.exists():
             logger.warn("AssetBrowser", "Attempted to preview a file but it didn't exist")
             return "none", ""
-        with open(asset_file, "rb") as asset:
-            signature = asset.read(4)
-        file_type = "text"
+
+        file_type = self.FILE_TYPES.get(asset_file.entry_name.suffix, "unknown")
+        logger.debug("AssetBrowser", f"Parsed {asset_file.entry_name.suffix} as {file_type}")
+
         file_preview = ""
-        if signature == b"OggS":
-            file_type = "ogg"
-        if signature == b"\x89PNG":
-            file_type = "png"
         if file_type == "text":
             try:
-                with open(asset_file, "r") as text_asset:
-                    file_preview = text_asset.read(1024)
+                with open(asset_file.entry_path, "r") as text_asset: file_preview = text_asset.read(1024)
             except UnicodeDecodeError:
+                logger.warn("AssetBrowser", f"Failed to generate a preview for {asset_file.entry_name}")
                 file_type = "unknown"
-        logger.debug("AssetBrowser", f"File type: {file_type}")
         return file_type, file_preview
 
     def on_resize(self, key_code):
@@ -101,6 +136,9 @@ class AssetIndex:
         virtual_path: pathlib.PurePath
         asset_hash: str
         asset_size: int
+
+        def __repr__(self) -> str:
+            return f"<File of AssetIndex('{self.virtual_path}')>"
 
     def __init__(self, asset_index_json):
         self.asset_index = asset_index_json["objects"]
@@ -113,21 +151,62 @@ class AssetIndex:
             self.asset_list.append(asset_index_element)
     
     def get_file_tree(self):
-        file_tree = {}
+        file_tree = AssetTreeElement()
         for asset in self.asset_list:
             current_dir = file_tree
+            depth_indent = ""
             for part in asset.virtual_path.parts:
-                if current_dir.get(part) is None:
-                    current_dir.update({part: {}})
-                current_dir = current_dir[part]
-            current_dir.update({"file:hash": str(asset.asset_hash)})
+                if not current_dir.has_folder(depth_indent + part):
+                    current_dir.create_folder(depth_indent + part)
+                current_dir = current_dir.get_folder(depth_indent + part)
+                depth_indent += "  "
+            current_dir.entry_type = "entry:file"
+            current_dir.entry_hash = asset.asset_hash
+            current_dir.entry_name = asset.virtual_path
         return file_tree
 
-class AssetTreeElement:
-    name = ""
-    entry_type = ""
-    children = []
-    entry_hash = ""
+# This could be done with dicts.. Maybe I'll revert to them
+class AssetTreeElement(IListElement):
+    name: str = "."
+    entry_type: Union[Literal["entry:file"], Literal["entry:directory"]] = "entry:directory"
+    children: Dict[str, "AssetTreeElement"]
+    entry_hash: str
+    entry_name: pathlib.PurePath
+    entry_path: pathlib.Path
+    expanded: bool = False
+
+    def __init__(self) -> None:
+        self.children = {}
+
+    def has_folder(self, name):
+        return self.children.get(name) is not None
+    
+    def get_folder(self, name):
+        return self.children[name]
+    
+    def create_folder(self, name):
+        folder = AssetTreeElement()
+        folder.name = name
+        folder.entry_type = "entry:directory"
+        self.children.update({name: folder})
+    
+    def list_folder(self):
+        return list(self.children.values())
+    
+    def count_expanded_children(self):
+        child_count = 0
+        to_count = [self]
+        while to_count:
+            new_kids = []
+            for counter in to_count:
+                if counter.expanded: new_kids.extend(counter.list_folder())
+            child_count += len(new_kids)
+            to_count.clear()
+            to_count.extend(new_kids)
+        return child_count
+    
+    def __repr__(self) -> str:
+        return f"<{'Folder' if self.entry_type == 'entry:directory' else 'File' } object ('{self.name}')>"
 
 def setup():
     try:
