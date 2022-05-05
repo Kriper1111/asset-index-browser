@@ -11,9 +11,9 @@ TUI-based asset index browser for Minecraft asset lists (json files in `assets/i
 *I'm not sure whether 3.7 is the minimum, but it seems like the safest bet.*
 
 ## Usage:
-Run with the *preferrably* absolute path to the asset index JSON.
+Run `browser.py` with the *preferrably* absolute path to the asset index JSON.
 
 In the application:
-* [Up] and [Down] arrow keys to move selection
+* [Arrow Up] and [Arrow Down] to move selection
 * [Space], [Enter] or [+] to expand selection
-* [X] to extract the selection
+* [Key X] to extract the selection
