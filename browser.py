@@ -67,11 +67,9 @@ class AssetIndexBrowser(IInputListener):
 
             if selected_file.entry_type == 'entry:directory':
                 if not selected_file.expanded:
-                    self.display_manager.list_view.insert_items(selected_file.list_folder())
-                    selected_file.expanded = True
+                    self.display_manager.list_view.insert_items(selected_file.expand())
                 else:
-                    self.display_manager.list_view.collapse_items(selected_file.count_expanded_children())
-                    selected_file.expanded = False
+                    self.display_manager.list_view.collapse_items(selected_file.collapse())
             elif selected_file.entry_type == 'entry:file':
                 file_preview = self.get_file_preview(selected_file)
                 if not file_preview[1]:
@@ -226,12 +224,17 @@ class AssetTreeElement(IListElement):
             walk_objects.clear()
             walk_objects.extend(new_walk_objects)
 
-    def count_expanded_children(self):
+    def expand(self):
+        self.expanded = True
+        return self.list_folder()
+
+    def collapse(self):
         child_count = 0
         for root, dirs, files in self.walk_tree():
             if root.expanded:
                 child_count += len(dirs)
                 child_count += len(files)
+                root.expanded = False
         return child_count
 
     def __repr__(self) -> str:
