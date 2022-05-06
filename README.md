@@ -17,3 +17,4 @@ In the application:
 * [Arrow Up] and [Arrow Down] to move selection
 * [Space], [Enter] or [+] to expand selection
 * [Key X] to extract the selection
+* [Key Q] to exit

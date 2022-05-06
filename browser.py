@@ -54,7 +54,7 @@ class AssetIndexBrowser(IInputListener):
         self.termination.set()
 
     def on_key(self, key_code):
-        self.display_manager.status_panel.set_text(" | Arrows to move selection | X to extract | Space to expand folders | ")
+        self.display_manager.status_panel.set_text(" | Arrows to move selection | X to extract | Space to expand folders | Q to exit | ")
         if key_code == "Q":
             self.terminate()
         elif key_code == "KEY_UP":
