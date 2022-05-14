@@ -3,7 +3,6 @@ import pathlib
 import shutil
 import sys
 import traceback
-from threading import Event
 from typing import Dict, List, Literal, Tuple, Union, cast
 
 from display import Align, DisplayManager, IListElement
@@ -12,6 +11,7 @@ from logger import logger
 
 
 class AssetIndexBrowser(IInputListener):
+    HELP_TEXT = " | Arrows to move selection | X to extract | Space to expand folders | Q to exit | "
     FILE_TYPES = {
         ".mcmeta": "text",
         ".txt": "text",
@@ -27,7 +27,7 @@ class AssetIndexBrowser(IInputListener):
         self.display_manager: DisplayManager
 
         self.asset_index_tree: "AssetTreeElement"
-        self.termination = Event()
+        self.termination = False
 
     def load_index(self, asset_index_path):
         asset_index = pathlib.Path(asset_index_path)
@@ -42,19 +42,24 @@ class AssetIndexBrowser(IInputListener):
         self.display_manager = DisplayManager()
         self.display_manager.start()
         self.display_manager.set_title(f"Asset index: {self.asset_index_name}")
-        self.display_manager.preview.set_text("Select a file to preview", horizontal_align=Align.CENTER, vertical_align=Align.CENTER)
+        self.display_manager.preview.set_text_align(Align.CENTER, Align.CENTER)
+        self.display_manager.preview.set_text("Select a file to preview")
         self.display_manager.list_view.set_style("COLOR_BLUE", {"entry_type": "entry:directory"})
         self.display_manager.list_view.set_list(self.asset_index_tree.list_folder())
+        self.display_manager.status_panel.set_text(self.HELP_TEXT)
         self.display_manager.input_manager.add_listener(self)
-        self.termination.wait()
+        while not self.termination:
+            self.display_manager.input_manager.dispatch_event()
 
     def terminate(self):
-        # logger.info("AssetBrowser", "Terminating..")
         self.display_manager.stop()
-        self.termination.set()
+        self.termination = True
 
     def on_key(self, key_code):
-        self.display_manager.status_panel.set_text(" | Arrows to move selection | X to extract | Space to expand folders | Q to exit | ")
+        # Lame, should maybe find a way to "reset" text after an input or something
+        # The only reason why this line exists is because extraction overrides the status text
+        self.display_manager.status_panel.set_text(self.HELP_TEXT)
+
         if key_code == "Q":
             self.terminate()
         elif key_code == "KEY_UP":
@@ -62,7 +67,7 @@ class AssetIndexBrowser(IInputListener):
         elif key_code == "KEY_DOWN":
             self.display_manager.list_view.prev()
         elif key_code == "+" or key_code == " " or key_code == "\n":
-            self.display_manager.preview.set_text("Select a file to preview", horizontal_align=Align.CENTER, vertical_align=Align.CENTER)
+            self.display_manager.preview.set_text("Select a file to preview")
             selected_file = self.get_selected_file()
 
             if selected_file.entry_type == 'entry:directory':
@@ -77,11 +82,7 @@ class AssetIndexBrowser(IInputListener):
                     if file_preview[0] == "none": reason += "because this file does not exist."
                     elif file_preview[0] == "unknown": reason += "because it's format is not recognized."
                     else: reason += "because it's not a text file"
-                    self.display_manager.preview.set_text(
-                        reason,
-                        horizontal_align=Align.CENTER,
-                        vertical_align=Align.CENTER
-                    )
+                    self.display_manager.preview.set_text(reason)
                 else:
                     self.display_manager.preview.set_text(file_preview[1])
         elif key_code == "X":
@@ -140,7 +141,7 @@ class AssetIndexBrowser(IInputListener):
                 file_type = "unknown"
         return file_type, file_preview
 
-    def on_resize(self, key_code):
+    def on_resize(self):
         pass
 
 class AssetIndex:
@@ -257,6 +258,7 @@ def setup():
     except KeyboardInterrupt:
         logger.warn("AssetBrowser", "Keyboard Interrupt!")
         asset_index_browser.terminate()
+        print("Please use [Key Q] to exit next time!")
 
 if __name__ == "__main__":
     setup()

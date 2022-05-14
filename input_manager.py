@@ -1,6 +1,5 @@
 import curses
 import traceback
-from threading import Thread
 from typing import TYPE_CHECKING, Dict
 
 from logger import logger
@@ -13,20 +12,11 @@ class IInputListener:
     def on_key(self, key: str) -> None: ...
     def on_resize(self) -> None: ...
 
-class InputManager(Thread):
+class InputManager:
     def __init__(self):
         self.curse: "CursesWindow"
         self.listeners: Dict[int, IInputListener] = {}
         self.running = True
-        super().__init__(name="Input Manager", daemon=False)
-
-    def run(self):
-        if not self.curse:
-            raise ValueError("[InputManager] Unbound window!")
-        while self.running:
-            try: self.dispatch_event()
-            except KeyboardInterrupt:
-                logger.warn("InputManager", "Caught Ctrl-C!")
 
     # NOTE: Does not convert keys to key codes, i.e. layout-sensitive
     def dispatch_event(self):
@@ -44,9 +34,6 @@ class InputManager(Thread):
             except:
                 logger.warn("InputManager", f"Listener {type(listener)} has caused an error")
                 logger.warn("InputManager", traceback.format_exc())
-
-    def stop(self):
-        self.running = False
 
     def bind_window(self, stdscr: "CursesWindow"):
         self.curse = stdscr

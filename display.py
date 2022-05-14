@@ -45,15 +45,13 @@ class DisplayManager(IInputListener):
         self.recalculate_layout()
         self.input_manager.bind_window(self.stdscr)
         self.input_manager.add_listener(self)
-        self.input_manager.start()
 
     def stop(self):
-        self.input_manager.stop()
         self.stop_curses()
 
     def recalculate_layout(self):
         terminal_size = TerminalSize(*self.stdscr.getmaxyx())
-        self.stdscr.refresh()
+        self.stdscr.clear()
 
         self.list_view.recalculate_layout(terminal_size)
         self.preview.recalculate_layout(terminal_size)
@@ -65,6 +63,10 @@ class DisplayManager(IInputListener):
 
     def on_resize(self):
         self.recalculate_layout()
+        self.preview.refresh_contents()
+        self.list_view.refresh_contents()
+        self.status_panel.refresh_contents()
+        self.stdscr.refresh()
 
     def on_key(self, keycode): pass
 
@@ -139,22 +141,22 @@ class DisplayPanelProperties:
         if right is not None: self.right = right
         if bottom is not None: self.bottom = bottom
         return self
-    
+
     def set_alignment(self, horizontal: Align=None, vertical: Align=None):
-        if horizontal: self.float_horizontal = horizontal
         if vertical: self.float_vertical = vertical
+        if horizontal: self.float_horizontal = horizontal
         return self
-    
+
     def set_borders(self, vertical: bool=None, horizontal: bool=None):
         if vertical: self.box_vertical = vertical
         if horizontal: self.box_horizontal = horizontal
         return self
-    
+
     def set_size(self, width: Number=None, height: Number=None):
         if width: self.width = width
         if height: self.height = height
         return self
-    
+
     def set_name(self, name: str):
         self.registry_name = name
         return self
@@ -246,7 +248,7 @@ class DisplayPanel:
         finally:
             self.box()
             self.window.refresh()
-    
+
     def add_string(self, y: int, x: int, string: str, attrs: int = 0):
         y += int(not self.properties.box_vertical)
         x += int(not self.properties.box_horizontal)
@@ -256,14 +258,12 @@ class DisplayPanel:
     def recalculate_layout(self, terminal_size: TerminalSize):
         window = self.get_size(terminal_size)
 
-        self.window.mvwin(window.top, window.left)
         self.window.resize(window.height, window.width)
+        self.window.mvwin(window.top, window.left)
 
         self.max_width = window.width - (2 if self.properties.box_vertical else 0)
         self.max_height = window.height - (2 if self.properties.box_horizontal else 0)
 
-        self.window.clear()
-        self.box()
         self.window.refresh()
 
     def box(self, horizonal: bool=False, vertical: bool=False):
@@ -281,8 +281,10 @@ class Panel(DisplayPanel):
     def __init__(self, properties: DisplayPanelProperties):
         super().__init__(properties)
         self.contents: str = ""
+        self.text_align_horizontal = Align.LEFT
+        self.text_align_vertical = Align.TOP
 
-    def refresh_contents(self, horizontal_align: Align, vertical_align: Align):
+    def refresh_contents(self):
         viewport = []
 
         for line in self.contents.splitlines()[:self.max_height]:
@@ -291,15 +293,20 @@ class Panel(DisplayPanel):
         viewport = viewport[:self.max_height]
 
         with self.begin_writing():
-            lineno = vertical_align.get_offset(len(viewport), self.max_height)
+            lineno = self.text_align_vertical.get_offset(len(viewport), self.max_height)
             for line in viewport:
-                line_offset = horizontal_align.get_offset(len(line), self.max_width)
+                line_offset = self.text_align_horizontal.get_offset(len(line), self.max_width)
                 self.add_string(lineno, line_offset, line)
                 lineno += 1
 
-    def set_text(self, new_text: str, horizontal_align: Align = Align.LEFT, vertical_align: Align = Align.TOP):
+    # Sets the text align for all future set_text calls
+    def set_text_align(self, horizontal_align: Align=None, vertical_align: Align=None):
+        if horizontal_align: self.text_align_horizontal = horizontal_align
+        if vertical_align: self.text_align_vertical = vertical_align
+
+    def set_text(self, new_text: str):
         self.contents = new_text
-        self.refresh_contents(horizontal_align, vertical_align)
+        self.refresh_contents()
 
 class IListElement:
     name: str
