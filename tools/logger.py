@@ -2,7 +2,7 @@ import atexit
 from datetime import datetime as dt
 from typing import Any
 
-from util import SCRIPT_DIRECTORY
+from tools import SCRIPT_DIRECTORY
 
 
 class Logger:
@@ -23,22 +23,23 @@ class Logger:
             self.__log_counter__ = 0
             self.log_file.flush()
 
-    def __getattr__(self, name: str) -> Any:
-        if name in ["debug", "info", "warn", "error"]:
-            return lambda who, what: self.__log__(name.upper(), who, what)
-        return object.__getattribute__(self, name)
+    # def __getattr__(self, name: str) -> Any:
+    #     if name in ["debug", "info", "warn", "error"]:
+    #         return lambda who, what: self.__log__(name.upper(), who, what)
+    #     return object.__getattribute__(self, name)
 
-    # def debug(self, who: str, what: Any):
-    #     self.__log__("DEBUG", who, what)
+    def debug(self, who: str, what: Any):
+        self.__log__("DEBUG", who, what)
 
-    # def info(self, who: str, what: Any):
-    #     self.__log__("INFO", who, what)
+    def info(self, who: str, what: Any):
+        self.__log__("INFO", who, what)
 
-    # def error(self, who: str, what: Any):
-    #     self.__log__("ERROR", who, what)
+    def error(self, who: str, what: Any):
+        self.__log__("ERROR", who, what)
 
-    # def warn(self, who: str, what: Any):
-    #     self.__log__("WARN", who, what)
+    def warn(self, who: str, what: Any):
+        self.__log__("WARN", who, what)
+
     def flush(self):
         self.log_file.flush()
 

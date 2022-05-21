@@ -1,21 +1,32 @@
+from __future__ import annotations
+
 import curses
 import textwrap
 from contextlib import contextmanager
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple, Union
+from math import floor
+from typing import TYPE_CHECKING, NamedTuple
 
-from input_manager import IInputListener, InputManager
-from logger import logger
-from util import clamp, floor
+from tools.input_manager import IInputListener, InputManager
+from tools.logger import logger
 
 TerminalSize = NamedTuple("TerminalSize", [("height", int), ("width", int)])
 Window = NamedTuple("WindowSize", [("width", int), ("height", int), ("left", int), ("top", int)])
-Number = Union[float, int]
 
 
 if TYPE_CHECKING:
+    from typing import Any, Callable, Dict, List, Optional, Union
+
     import _curses
     CursesWindow = _curses._CursesWindow
+
+    Number = Union[float, int]
+
+def scale(number: "Number", factor: "Number") -> int:
+    return number if isinstance(number, int) else floor(number * factor)
+
+def clamp(value, value_min, value_max):
+    return min(max(value, value_min), value_max)
 
 class DisplayManager(IInputListener):
     def __init__(self):
@@ -68,15 +79,15 @@ class DisplayManager(IInputListener):
         self.status_panel.refresh_contents()
         self.stdscr.refresh()
 
-    def on_key(self, keycode): pass
+    def on_key(self, key_code): pass
 
     def set_title(self, title: str):
         self.title = title
         self.draw_title()
 
     def draw_title(self):
-        title_pos = (self.stdscr.getmaxyx()[1] - len(self.title) - 2) // 2
         terminal_size = TerminalSize(*self.stdscr.getmaxyx())
+        title_pos = Align.CENTER.get_offset(len(self.title) + 2, terminal_size.width)
         self.stdscr.hline(0, 0, "=", terminal_size.width)
         self.stdscr.addstr(0, title_pos, f" {self.title} ")
         self.stdscr.refresh()
@@ -92,11 +103,8 @@ class DisplayManager(IInputListener):
         curses.noecho()
         curses.cbreak()
         self.stdscr.keypad(True)
-        try:
-            curses.start_color()
-            curses.use_default_colors()
-        except:
-            pass
+
+        Colors.init()
 
 class Align(Enum):
     _ignore_ = ["offset_getters"]
@@ -106,7 +114,7 @@ class Align(Enum):
     RIGHT = 2
     BOTTOM = 2
 
-    offset_getters: Dict[int, Callable[[int, int], int]]
+    offset_getters: "Dict[int, Callable[[int, int], int]]"
 
     def get_offset(self, length: int, max_size: int):
         offset_getter = self.offset_getters.get(self.value, self.offset_getters[0])
@@ -119,13 +127,13 @@ Align.offset_getters = {
 }
 
 class DisplayPanelProperties:
-    top: Number = 1
-    left: Number = 0
-    right: Number = 0
-    bottom: Number = 1
+    top: "Number" = 1
+    left: "Number" = 0
+    right: "Number" = 0
+    bottom: "Number" = 1
 
-    width: Number = 1.0
-    height: Number = 1.0
+    width: "Number" = 1.0
+    height: "Number" = 1.0
 
     float_horizontal = Align.LEFT
     float_vertical = Align.TOP
@@ -135,24 +143,24 @@ class DisplayPanelProperties:
 
     registry_name = "DisplayPanel"
 
-    def set_constraints(self, left: Number=None, top: Number=None, bottom: Number=None, right: Number=None):
+    def set_constraints(self, left: "Optional[Number]"=None, top: "Optional[Number]"=None, bottom: "Optional[Number]"=None, right: "Optional[Number]"=None):
         if top is not None: self.top = top
         if left is not None: self.left = left
         if right is not None: self.right = right
         if bottom is not None: self.bottom = bottom
         return self
 
-    def set_alignment(self, horizontal: Align=None, vertical: Align=None):
+    def set_alignment(self, horizontal: "Optional[Align]"=None, vertical: "Optional[Align]"=None):
         if vertical: self.float_vertical = vertical
         if horizontal: self.float_horizontal = horizontal
         return self
 
-    def set_borders(self, vertical: bool=None, horizontal: bool=None):
+    def set_borders(self, vertical: "Optional[bool]"=None, horizontal: "Optional[bool]"=None):
         if vertical: self.box_vertical = vertical
         if horizontal: self.box_horizontal = horizontal
         return self
 
-    def set_size(self, width: Number=None, height: Number=None):
+    def set_size(self, width: "Optional[Number]"=None, height: "Optional[Number]"=None):
         if width: self.width = width
         if height: self.height = height
         return self
@@ -162,81 +170,52 @@ class DisplayPanelProperties:
         return self
 
 class DisplayPanel:
-    properties: DisplayPanelProperties
+    properties: "DisplayPanelProperties"
     window: "CursesWindow"
 
     max_width: int
     max_height: int
 
-    def __init__(self, properties: DisplayPanelProperties):
+    def __init__(self, properties: "DisplayPanelProperties"):
         self.properties = properties
 
         window = self.get_size(TerminalSize(10, 10))
         self.window = curses.newwin(window.height, window.width, window.top, window.left)
+        self.window.leaveok(True)
 
         self.max_width = window.width - 2
         self.max_height = window.height - 2
 
-    def get_size(self, terminal_size: TerminalSize) -> Window:
+    def get_size(self, terminal_size: "TerminalSize") -> "Window":
         calculated_top = 0
         calculated_left = 0
         calculated_width = 0
         calculated_height = 0
 
-        top = self.properties.top if isinstance(self.properties.top, int) else floor(self.properties.top * terminal_size.height)
-        bottom = self.properties.bottom if isinstance(self.properties.bottom, int) else floor(self.properties.bottom * terminal_size.height)
-        height = self.properties.height if isinstance(self.properties.height, int) else floor(self.properties.height * terminal_size.height)
+        top = scale(self.properties.top, terminal_size.height)
+        bottom = scale(self.properties.bottom, terminal_size.height)
+        height = scale(self.properties.height, terminal_size.height)
 
-        if self.properties.float_vertical == Align.TOP:
-            leftover_height = terminal_size.height - top - bottom
-            calculated_height = leftover_height if height == 0 else min(leftover_height, height)
-            calculated_top = top
-        elif self.properties.float_vertical == Align.CENTER:
-            if height == 0: # 0 means 'auto'
-                calculated_top = top
-                calculated_height = terminal_size.height - top - bottom
-            else: # It can resize in range of height..0
-                leftover_height = terminal_size.height - top - bottom
-                calculated_height = min(leftover_height, height)
-                calculated_top = (terminal_size.height - calculated_height) // 2
-        elif self.properties.float_vertical == Align.BOTTOM:
-            leftover_height = terminal_size.height - top - bottom
-            calculated_height = leftover_height if height == 0 else min(leftover_height, height)
-            # calculated_height = terminal_size.height - bottom if height == 0 else height
-            calculated_top = terminal_size.height - calculated_height
+        if self.properties.float_vertical == Align.TOP: offset = top
+        elif self.properties.float_vertical == Align.BOTTOM: offset = -bottom
+        else: offset = 0
 
-        left = self.properties.left if isinstance(self.properties.left, int) else floor(self.properties.left * terminal_size.width)
-        right = self.properties.right if isinstance(self.properties.right, int) else floor(self.properties.right * terminal_size.width)
-        width = self.properties.width if isinstance(self.properties.width, int) else floor(self.properties.width * terminal_size.width)
+        leftover_height = terminal_size.height - top - bottom
+        calculated_height = leftover_height if height == 0 else min(leftover_height, height)
+        calculated_top = self.properties.float_vertical.get_offset(calculated_height, terminal_size.height) + offset
 
         # Assuming the process is the same for horizontals
-        if self.properties.float_horizontal == Align.LEFT:
-            calculated_left = left
-            leftover_width = terminal_size.width - left - right
-            calculated_width = leftover_width if width == 0 else min(leftover_width, width)
-        elif self.properties.float_horizontal == Align.CENTER:
-            if width == 0: # 0 means 'auto'
-                calculated_left = left
-                calculated_width = terminal_size.width - left - right
-            else: # It can resize in range of width..0
-                leftover_width = terminal_size.width - left - right
-                calculated_width = min(leftover_width, width)
-                calculated_left = (terminal_size.width - calculated_width) // 2
-        elif self.properties.float_horizontal == Align.RIGHT:
-            calculated_width = terminal_size.width - right if width == 0 else width
-            calculated_left = terminal_size.width - calculated_width
+        left = scale(self.properties.left, terminal_size.width)
+        right = scale(self.properties.right, terminal_size.width)
+        width = scale(self.properties.width, terminal_size.width)
 
-        #     logger.debug("DisplayPanel", f"Resizing panel {self.properties.registry_name}")
-        #     logger.debug("DisplayPanel", f"""Horizontal layout rules:
-        # + Float: {self.properties.float_horizontal}
-        # + Left: {self.properties.left}
-        # + Right: {self.properties.right}
-        # + Width: {self.properties.width}""")
-        #     logger.debug("DisplayPanel", f"""Calculated layout:
-        # + Width: {calculated_width}
-        # + Height: {calculated_height}
-        # + Top: {calculated_top}
-        # + Left: {calculated_left}""")
+        if self.properties.float_horizontal == Align.LEFT: offset = left
+        elif self.properties.float_horizontal == Align.RIGHT: offset = -right
+        else: offset = 0
+
+        leftover_width = terminal_size.width - left - right
+        calculated_width = leftover_width if width == 0 else min(leftover_width, width)
+        calculated_left = self.properties.float_horizontal.get_offset(calculated_width, terminal_size.width) + offset
 
         return Window(calculated_width, calculated_height, calculated_left, calculated_top)
 
@@ -255,7 +234,7 @@ class DisplayPanel:
         try: self.window.addstr(y, x, string, attrs)
         except curses.error: pass
 
-    def recalculate_layout(self, terminal_size: TerminalSize):
+    def recalculate_layout(self, terminal_size: "TerminalSize"):
         window = self.get_size(terminal_size)
 
         self.window.resize(window.height, window.width)
@@ -278,7 +257,7 @@ class DisplayPanel:
         raise NotImplementedError()
 
 class Panel(DisplayPanel):
-    def __init__(self, properties: DisplayPanelProperties):
+    def __init__(self, properties: "DisplayPanelProperties"):
         super().__init__(properties)
         self.contents: str = ""
         self.text_align_horizontal = Align.LEFT
@@ -299,26 +278,34 @@ class Panel(DisplayPanel):
                 self.add_string(lineno, line_offset, line)
                 lineno += 1
 
-    # Sets the text align for all future set_text calls
-    def set_text_align(self, horizontal_align: Align=None, vertical_align: Align=None):
+    def set_text(self, new_text: str, horizontal_align: "Optional[Align]"=None, vertical_align: "Optional[Align]"=None):
         if horizontal_align: self.text_align_horizontal = horizontal_align
         if vertical_align: self.text_align_vertical = vertical_align
-
-    def set_text(self, new_text: str):
         self.contents = new_text
         self.refresh_contents()
-
-class IListElement:
-    name: str
+        self.text_align_horizontal = Align.LEFT
+        self.text_align_vertical = Align.TOP
 
 class Colors:
     color_pair_count = 1 # 0th pair is the default color
-    color_registry: Dict[str, int] = {}
+    color_registry: "Dict[str, int]" = {}
+    __has_colors__ = False
+
+    @classmethod
+    def init(cls):
+        try:
+            curses.start_color()
+            curses.use_default_colors()
+            cls.__has_colors__ = True
+        except Exception:
+            cls.__has_colors__ = False
 
     @classmethod
     def get_color(cls, forgeround=-1, background=-1):
         if forgeround == -1 and background == -1:
             raise ValueError("Invalid color pair!")
+
+        if not cls.__has_colors__: return curses.A_NORMAL
 
         color_pair_hash = f"{forgeround}:{background}"
         color_pair = cls.color_registry.get(color_pair_hash)
@@ -331,6 +318,9 @@ class Colors:
             cls.color_pair_count += 1
 
         return color_pair
+
+class IListElement:
+    name: str
 
 class ListView(DisplayPanel):
     class StyleRule:
@@ -353,8 +343,8 @@ class ListView(DisplayPanel):
         super().__init__(properties)
         self.cursor = 0
         self.scroll_offset = 0
-        self.list: List[IListElement] = []
-        self.styles: List["ListView.StyleRule"] = []
+        self.list: "List[IListElement]" = []
+        self.styles: "List[ListView.StyleRule]" = []
 
     def refresh_contents(self):
         with self.begin_writing():

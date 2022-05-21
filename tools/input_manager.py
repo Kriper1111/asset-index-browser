@@ -2,14 +2,14 @@ import curses
 import traceback
 from typing import TYPE_CHECKING, Dict
 
-from logger import logger
+from tools.logger import logger
 
 if TYPE_CHECKING:
     import _curses
     CursesWindow = _curses._CursesWindow
 
 class IInputListener:
-    def on_key(self, key: str) -> None: ...
+    def on_key(self, key_code: str) -> None: ...
     def on_resize(self) -> None: ...
 
 class InputManager:

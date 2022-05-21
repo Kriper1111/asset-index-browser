@@ -5,10 +5,18 @@ import sys
 import traceback
 from typing import Dict, List, Literal, Tuple, Union, cast
 
-from display import Align, DisplayManager, IListElement
-from input_manager import IInputListener
-from logger import logger
+from tools.display import Align, DisplayManager, IListElement
+from tools.input_manager import IInputListener
+from tools.logger import logger
 
+HELP_TEXT = """
+Usage: python browser.py [path]
+
+Arugments:
+    path - path to the .json file in "indexes" folder. Or anywhere, we don't judge.
+""".strip()
+
+class InvalidIndexError(Exception): pass
 
 class AssetIndexBrowser(IInputListener):
     HELP_TEXT = " | Arrows to move selection | X to extract | Space to expand folders | Q to exit | "
@@ -42,8 +50,7 @@ class AssetIndexBrowser(IInputListener):
         self.display_manager = DisplayManager()
         self.display_manager.start()
         self.display_manager.set_title(f"Asset index: {self.asset_index_name}")
-        self.display_manager.preview.set_text_align(Align.CENTER, Align.CENTER)
-        self.display_manager.preview.set_text("Select a file to preview")
+        self.display_manager.preview.set_text("Select a file to preview", Align.CENTER, Align.CENTER)
         self.display_manager.list_view.set_style("COLOR_BLUE", {"entry_type": "entry:directory"})
         self.display_manager.list_view.set_list(self.asset_index_tree.list_folder())
         self.display_manager.status_panel.set_text(self.HELP_TEXT)
@@ -67,7 +74,7 @@ class AssetIndexBrowser(IInputListener):
         elif key_code == "KEY_DOWN":
             self.display_manager.list_view.prev()
         elif key_code == "+" or key_code == " " or key_code == "\n":
-            self.display_manager.preview.set_text("Select a file to preview")
+            self.display_manager.preview.set_text("Select a file to preview", Align.CENTER, Align.CENTER)
             selected_file = self.get_selected_file()
 
             if selected_file.entry_type == 'entry:directory':
@@ -82,7 +89,7 @@ class AssetIndexBrowser(IInputListener):
                     if file_preview[0] == "none": reason += "because this file does not exist."
                     elif file_preview[0] == "unknown": reason += "because it's format is not recognized."
                     else: reason += "because it's not a text file"
-                    self.display_manager.preview.set_text(reason)
+                    self.display_manager.preview.set_text(reason, Align.CENTER, Align.CENTER)
                 else:
                     self.display_manager.preview.set_text(file_preview[1])
         elif key_code == "X":
@@ -154,9 +161,13 @@ class AssetIndex:
             return f"<File of AssetIndex('{self.virtual_path}')>"
 
     def __init__(self, asset_index_json):
-        self.asset_index = asset_index_json["objects"]
+        self.asset_index = asset_index_json.get("objects")
+        if not isinstance(self.asset_index, dict): raise InvalidIndexError()
         self.asset_list: List[AssetIndex.AssetIndexElement] = []
         for object_name, metadata in self.asset_index.items():
+            if metadata.get("hash") is None and metadata.get("size") is None:
+                logger.warn("AssetIndex", f"Encountered unprocessible object entry: <{object_name}>")
+                continue
             asset_index_element = self.AssetIndexElement()
             asset_index_element.virtual_path = pathlib.PurePath(object_name)
             asset_index_element.asset_hash = metadata.get("hash")
@@ -245,13 +256,19 @@ def setup():
     try:
         asset_index = sys.argv[1]
     except IndexError:
-        print("Please provide a path to an asset index to browse")
+        print(HELP_TEXT)
         return
 
     asset_index_browser = AssetIndexBrowser()
     try:
         asset_index_browser.load_index(asset_index)
         asset_index_browser.await_termination()
+    except FileNotFoundError:
+        print("Err: Specified asset index file was unable to be found.")
+        print(HELP_TEXT)
+    except InvalidIndexError:
+        print("Err: Target file does not match the index schema.")
+        print(HELP_TEXT)
     except Exception:
         asset_index_browser.terminate()
         traceback.print_exc()
